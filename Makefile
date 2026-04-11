@@ -61,6 +61,6 @@ test: Test.cpp $(SS_OBJS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(SS_OBJS) Test.cpp -o $@ -lm
 
 clean:
-	rm -f benchmark *.o
+	rm -f benchmark test *.o
 
 .PHONY: all clean
