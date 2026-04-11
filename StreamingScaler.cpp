@@ -166,10 +166,10 @@ static void YScaleOutBgra(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
       if (alpha != 0) {
         val /= alpha;
       }
-      aOut[j] = static_cast<int>(roundf(ClampF(val) * 255.0f));
+      aOut[j] = static_cast<int>(ClampF(val) * 255.0f + 0.5f);
       aSums[tapOff + j] = 0.0f;
     }
-    aOut[3] = roundf(alpha * 255.0f);
+    aOut[3] = static_cast<int>(alpha * 255.0f + 0.5f);
     aSums[tapOff + 3] = 0.0f;
     aSums += 16;
     aOut += 4;
@@ -180,7 +180,7 @@ static void YScaleOutBgrx(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
   int tapOff = aTap * 4;
   for (int i = 0; i < aWidth; i++) {
     for (int j = 0; j < 3; j++) {
-      aOut[j] = static_cast<int>(roundf(ClampF(aSums[tapOff + j]) * 255.0f));
+      aOut[j] = static_cast<int>(ClampF(aSums[tapOff + j]) * 255.0f + 0.5f);
       aSums[tapOff + j] = 0.0f;
     }
     aOut[3] = 255;
