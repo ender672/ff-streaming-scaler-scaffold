@@ -160,17 +160,28 @@ static void ShiftLeftF(float* aF) {
 static void YScaleOutBgra(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
   int tapOff = aTap * 4;
   for (int i = 0; i < aWidth; i++) {
-    float alpha = ClampF(aSums[tapOff + 3]);
-    for (int j = 0; j < 3; j++) {
-      float val = aSums[tapOff + j];
-      if (alpha != 0) {
-        val /= alpha;
-      }
-      aOut[j] = static_cast<int>(ClampF(val) * 255.0f + 0.5f);
-      aSums[tapOff + j] = 0.0f;
+    float* s = aSums + tapOff;
+    float alpha = std::clamp(s[3], 0.0f, 1.0f);
+    float b = s[0];
+    float g = s[1];
+    float r = s[2];
+    if (alpha != 0) {
+      float invAlpha = 1.0f / alpha;
+      b *= invAlpha;
+      g *= invAlpha;
+      r *= invAlpha;
     }
+    b = std::clamp(b, 0.0f, 1.0f);
+    g = std::clamp(g, 0.0f, 1.0f);
+    r = std::clamp(r, 0.0f, 1.0f);
+    aOut[0] = static_cast<int>(b * 255.0f + 0.5f);
+    aOut[1] = static_cast<int>(g * 255.0f + 0.5f);
+    aOut[2] = static_cast<int>(r * 255.0f + 0.5f);
     aOut[3] = static_cast<int>(alpha * 255.0f + 0.5f);
-    aSums[tapOff + 3] = 0.0f;
+    s[0] = 0.0f;
+    s[1] = 0.0f;
+    s[2] = 0.0f;
+    s[3] = 0.0f;
     aSums += 16;
     aOut += 4;
   }
@@ -179,12 +190,18 @@ static void YScaleOutBgra(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
 static void YScaleOutBgrx(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
   int tapOff = aTap * 4;
   for (int i = 0; i < aWidth; i++) {
-    for (int j = 0; j < 3; j++) {
-      aOut[j] = static_cast<int>(ClampF(aSums[tapOff + j]) * 255.0f + 0.5f);
-      aSums[tapOff + j] = 0.0f;
-    }
+    float* s = aSums + tapOff;
+    float b = std::clamp(s[0], 0.0f, 1.0f);
+    float g = std::clamp(s[1], 0.0f, 1.0f);
+    float r = std::clamp(s[2], 0.0f, 1.0f);
+    aOut[0] = static_cast<int>(b * 255.0f + 0.5f);
+    aOut[1] = static_cast<int>(g * 255.0f + 0.5f);
+    aOut[2] = static_cast<int>(r * 255.0f + 0.5f);
     aOut[3] = 255;
-    aSums[tapOff + 3] = 0.0f;
+    s[0] = 0.0f;
+    s[1] = 0.0f;
+    s[2] = 0.0f;
+    s[3] = 0.0f;
     aSums += 16;
     aOut += 4;
   }
