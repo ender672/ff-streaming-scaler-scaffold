@@ -3,6 +3,11 @@ CXX := clang++
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 CXXFLAGS ?= -O3
+HOMEBREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+ifdef HOMEBREW_PREFIX
+CPPFLAGS += -I$(HOMEBREW_PREFIX)/opt/libpng/include
+LDFLAGS += -L$(HOMEBREW_PREFIX)/opt/libpng/lib
+endif
 else
 CXXFLAGS ?= -O2
 endif
