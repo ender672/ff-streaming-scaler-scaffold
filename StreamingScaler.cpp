@@ -69,8 +69,6 @@ static constexpr int kMaxDimension = 1000000;
  */
 static constexpr int kTaps = 4;
 
-static float ClampF(float aX) { return std::clamp(aX, 0.0f, 1.0f); }
-
 /**
  * Map from the discreet dest coordinate pos to a continuous source coordinate.
  * The resulting coordinate can range from -0.5 to the maximum of the
