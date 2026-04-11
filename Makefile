@@ -1,5 +1,14 @@
+CXX := clang++
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+CXXFLAGS ?= -O3
+else
 CXXFLAGS ?= -O2
-CXXFLAGS += -Wall -std=c++17
+endif
+
+CXXFLAGS += -Wall -std=c++20 -flto=thin
+LDFLAGS += -flto=thin
 
 # StreamingScaler objects
 SS_OBJS = StreamingScaler.o
@@ -46,10 +55,10 @@ ConvolutionFilterNEON.o: ConvolutionFilterNEON.cpp SkConvolver.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 benchmark: Benchmark.cpp $(OBJS)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(OBJS) Benchmark.cpp -o $@ -lpng -lm
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(OBJS) Benchmark.cpp -o $@ -lpng -lm
 
 test: Test.cpp $(SS_OBJS)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(SS_OBJS) Test.cpp -o $@ -lm
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(SS_OBJS) Test.cpp -o $@ -lm
 
 clean:
 	rm -f benchmark *.o
