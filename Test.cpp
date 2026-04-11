@@ -206,15 +206,8 @@ static void RefScale(uint8_t** aIn, int aInWidth, int aInHeight,
       preLine[j] = aIn[i][j] / 255.0L;
     }
 
-    // Premultiply alpha (BGRA) or force alpha to 1.0 (BGRX)
-    for (int j = 0; j < aInWidth; j++) {
-      if (aHasAlpha) {
-        long double alpha = preLine[j * kCmp + 3];
-        preLine[j * kCmp + 0] *= alpha;
-        preLine[j * kCmp + 1] *= alpha;
-        preLine[j * kCmp + 2] *= alpha;
-      }
-    }
+    // For BGRX, alpha is ignored (forced to 1.0 later).
+    // For BGRA, all four channels are scaled independently.
 
     RefXScale(preLine, aInWidth, intermediate[i], aOutWidth);
   }
@@ -224,21 +217,17 @@ static void RefScale(uint8_t** aIn, int aInWidth, int aInHeight,
   for (int i = 0; i < aOutHeight; i++) {
     for (int j = 0; j < aOutWidth; j++) {
       long double* px = aOut[i] + j * kCmp;
+      px[0] = ClampLd(px[0]);
+      px[1] = ClampLd(px[1]);
+      px[2] = ClampLd(px[2]);
       if (aHasAlpha) {
         long double alpha = ClampLd(px[3]);
-        if (alpha != 0.0L) {
-          px[0] /= alpha;
-          px[1] /= alpha;
-          px[2] /= alpha;
-        }
-        px[0] = ClampLd(px[0]);
-        px[1] = ClampLd(px[1]);
-        px[2] = ClampLd(px[2]);
-        px[3] = alpha;
+        // Enforce alpha >= max(R,G,B)
+        long double maxRgb = px[0];
+        if (px[1] > maxRgb) maxRgb = px[1];
+        if (px[2] > maxRgb) maxRgb = px[2];
+        px[3] = (alpha > maxRgb) ? alpha : maxRgb;
       } else {
-        px[0] = ClampLd(px[0]);
-        px[1] = ClampLd(px[1]);
-        px[2] = ClampLd(px[2]);
         px[3] = 1.0L;
       }
     }
