@@ -275,14 +275,10 @@ static void ScaleDownBgra(const uint8_t* aIn, float* aSumsY, int aOutWidth,
 
   for (int i = 0; i < aOutWidth; i++) {
     for (int j = 0; j < aBorderBuf[i]; j++) {
-      constexpr float kScale = 1.0f / 255.0f;
-      float alpha = aIn[3] * kScale;
-      float b = aIn[0] * kScale * alpha;
-      float g = aIn[1] * kScale * alpha;
-      float r = aIn[2] * kScale * alpha;
-      AddSampleToSumF(b, aCoeffsX, sum[0]);
-      AddSampleToSumF(g, aCoeffsX, sum[1]);
-      AddSampleToSumF(r, aCoeffsX, sum[2]);
+      float alpha = gI2fMap[aIn[3]];
+      for (int k = 0; k < 3; k++) {
+        AddSampleToSumF(gI2fMap[aIn[k]] * alpha, aCoeffsX, sum[k]);
+      }
       AddSampleToSumF(alpha, aCoeffsX, sum[3]);
       aIn += 4;
       aCoeffsX += 4;
@@ -314,10 +310,9 @@ static void ScaleDownBgrx(const uint8_t* aIn, float* aSumsY, int aOutWidth,
 
   for (int i = 0; i < aOutWidth; i++) {
     for (int j = 0; j < aBorderBuf[i]; j++) {
-      constexpr float kScale = 1.0f / 255.0f;
-      AddSampleToSumF(aIn[0] * kScale, aCoeffsX, sum[0]);
-      AddSampleToSumF(aIn[1] * kScale, aCoeffsX, sum[1]);
-      AddSampleToSumF(aIn[2] * kScale, aCoeffsX, sum[2]);
+      for (int k = 0; k < 3; k++) {
+        AddSampleToSumF(gI2fMap[aIn[k]], aCoeffsX, sum[k]);
+      }
       AddSampleToSumF(1.0f, aCoeffsX, sum[3]);
       aIn += 4;
       aCoeffsX += 4;
