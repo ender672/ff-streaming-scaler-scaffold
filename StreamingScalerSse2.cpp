@@ -215,55 +215,38 @@ static void YScaleOutBgraSse2(float* aSums, int aWidth, uint8_t* aOut,
   __m128 zero = _mm_setzero_ps();
   __m128i z = _mm_setzero_si128();
 
-  __m128 vals, alphaV;
+  __m128 vals;
   __m128i idx, packed;
-  float alpha;
   int i = 0;
   for (; i + 1 < aWidth; i += 2) {
-    /* Pixel 1: read only the current tap, zero it */
     vals = _mm_load_ps(aSums + tapOff);
-
-    alphaV = _mm_shuffle_ps(vals, vals, _MM_SHUFFLE(3, 3, 3, 3));
-    alphaV = _mm_min_ps(_mm_max_ps(alphaV, zero), one);
-    alpha = _mm_cvtss_f32(alphaV);
-    if (alpha != 0) {
-      vals = _mm_mul_ps(vals, _mm_rcp_ps(alphaV));
-    }
     vals = _mm_min_ps(_mm_max_ps(vals, zero), one);
-    {
-      __m128 hi = _mm_shuffle_ps(vals, alphaV, _MM_SHUFFLE(0, 0, 2, 2));
-      vals = _mm_shuffle_ps(vals, hi, _MM_SHUFFLE(2, 0, 1, 0));
-    }
     idx = _mm_cvttps_epi32(_mm_add_ps(_mm_mul_ps(vals, scale), half));
 
-    /* Zero consumed tap */
     _mm_store_si128(reinterpret_cast<__m128i*>(aSums + tapOff), z);
 
-    /* Pixel 2 */
     {
       __m128i idx2;
-      __m128 vals2, alphaV2;
+      __m128 vals2;
 
       vals2 = _mm_load_ps(aSums + 16 + tapOff);
-
-      alphaV2 = _mm_shuffle_ps(vals2, vals2, _MM_SHUFFLE(3, 3, 3, 3));
-      alphaV2 = _mm_min_ps(_mm_max_ps(alphaV2, zero), one);
-      alpha = _mm_cvtss_f32(alphaV2);
-      if (alpha != 0) {
-        vals2 = _mm_mul_ps(vals2, _mm_rcp_ps(alphaV2));
-      }
       vals2 = _mm_min_ps(_mm_max_ps(vals2, zero), one);
-      {
-        __m128 hi2 = _mm_shuffle_ps(vals2, alphaV2, _MM_SHUFFLE(0, 0, 2, 2));
-        vals2 = _mm_shuffle_ps(vals2, hi2, _MM_SHUFFLE(2, 0, 1, 0));
-      }
       idx2 = _mm_cvttps_epi32(_mm_add_ps(_mm_mul_ps(vals2, scale), half));
 
       packed = _mm_packs_epi32(idx, idx2);
       packed = _mm_packus_epi16(packed, packed);
+
+      /* Ensure alpha >= max(R,G,B) for premultiplication invariant */
+      {
+        __m128i s1 = _mm_srli_epi32(packed, 8);
+        __m128i mx = _mm_max_epu8(packed, s1);
+        __m128i s2 = _mm_srli_epi32(mx, 16);
+        mx = _mm_max_epu8(mx, s2);
+        packed = _mm_max_epu8(packed, _mm_slli_epi32(mx, 24));
+      }
+
       _mm_storel_epi64(reinterpret_cast<__m128i*>(aOut), packed);
 
-      /* Zero consumed tap */
       _mm_store_si128(reinterpret_cast<__m128i*>(aSums + 16 + tapOff), z);
     }
 
@@ -273,21 +256,19 @@ static void YScaleOutBgraSse2(float* aSums, int aWidth, uint8_t* aOut,
 
   for (; i < aWidth; i++) {
     vals = _mm_load_ps(aSums + tapOff);
-
-    alphaV = _mm_shuffle_ps(vals, vals, _MM_SHUFFLE(3, 3, 3, 3));
-    alphaV = _mm_min_ps(_mm_max_ps(alphaV, zero), one);
-    alpha = _mm_cvtss_f32(alphaV);
-    if (alpha != 0) {
-      vals = _mm_mul_ps(vals, _mm_rcp_ps(alphaV));
-    }
     vals = _mm_min_ps(_mm_max_ps(vals, zero), one);
-    {
-      __m128 hi = _mm_shuffle_ps(vals, alphaV, _MM_SHUFFLE(0, 0, 2, 2));
-      vals = _mm_shuffle_ps(vals, hi, _MM_SHUFFLE(2, 0, 1, 0));
-    }
     idx = _mm_cvttps_epi32(_mm_add_ps(_mm_mul_ps(vals, scale), half));
     packed = _mm_packs_epi32(idx, idx);
     packed = _mm_packus_epi16(packed, packed);
+
+    {
+      __m128i s1 = _mm_srli_epi32(packed, 8);
+      __m128i mx = _mm_max_epu8(packed, s1);
+      __m128i s2 = _mm_srli_epi32(mx, 16);
+      mx = _mm_max_epu8(mx, s2);
+      packed = _mm_max_epu8(packed, _mm_slli_epi32(mx, 24));
+    }
+
     *reinterpret_cast<int*>(aOut) = _mm_cvtsi128_si32(packed);
 
     _mm_store_si128(reinterpret_cast<__m128i*>(aSums + tapOff), z);
@@ -311,7 +292,7 @@ static void ScaleDownBgraSse2(const uint8_t* aIn, float* aSumsYOut,
 
   const float* lut = gI2fMap;
 
-  __m128 coeffsX, coeffsX2, coeffsXA, coeffsX2A, sampleX;
+  __m128 coeffsX, coeffsX2, sampleX;
   __m128 sumR = _mm_setzero_ps();
   __m128 sumG = _mm_setzero_ps();
   __m128 sumB = _mm_setzero_ps();
@@ -333,31 +314,29 @@ static void ScaleDownBgraSse2(const uint8_t* aIn, float* aSumsYOut,
         coeffsX = _mm_load_ps(aCoeffsXF);
         coeffsX2 = _mm_load_ps(aCoeffsXF + 4);
 
-        coeffsXA = _mm_mul_ps(coeffsX, _mm_set1_ps(lut[px0 >> 24]));
-
         sampleX = _mm_set1_ps(lut[px0 & 0xFF]);
-        sumR = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumR);
+        sumR = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumR);
 
         sampleX = _mm_set1_ps(lut[(px0 >> 8) & 0xFF]);
-        sumG = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumG);
+        sumG = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumG);
 
         sampleX = _mm_set1_ps(lut[(px0 >> 16) & 0xFF]);
-        sumB = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumB);
+        sumB = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumB);
 
-        sumA = _mm_add_ps(coeffsXA, sumA);
-
-        coeffsX2A = _mm_mul_ps(coeffsX2, _mm_set1_ps(lut[px1 >> 24]));
+        sampleX = _mm_set1_ps(lut[px0 >> 24]);
+        sumA = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumA);
 
         sampleX = _mm_set1_ps(lut[px1 & 0xFF]);
-        sumR2 = _mm_add_ps(_mm_mul_ps(coeffsX2A, sampleX), sumR2);
+        sumR2 = _mm_add_ps(_mm_mul_ps(coeffsX2, sampleX), sumR2);
 
         sampleX = _mm_set1_ps(lut[(px1 >> 8) & 0xFF]);
-        sumG2 = _mm_add_ps(_mm_mul_ps(coeffsX2A, sampleX), sumG2);
+        sumG2 = _mm_add_ps(_mm_mul_ps(coeffsX2, sampleX), sumG2);
 
         sampleX = _mm_set1_ps(lut[(px1 >> 16) & 0xFF]);
-        sumB2 = _mm_add_ps(_mm_mul_ps(coeffsX2A, sampleX), sumB2);
+        sumB2 = _mm_add_ps(_mm_mul_ps(coeffsX2, sampleX), sumB2);
 
-        sumA2 = _mm_add_ps(coeffsX2A, sumA2);
+        sampleX = _mm_set1_ps(lut[px1 >> 24]);
+        sumA2 = _mm_add_ps(_mm_mul_ps(coeffsX2, sampleX), sumA2);
 
         aIn += 8;
         aCoeffsXF += 8;
@@ -369,18 +348,17 @@ static void ScaleDownBgraSse2(const uint8_t* aIn, float* aSumsYOut,
 
         coeffsX = _mm_load_ps(aCoeffsXF);
 
-        coeffsXA = _mm_mul_ps(coeffsX, _mm_set1_ps(lut[px >> 24]));
-
         sampleX = _mm_set1_ps(lut[px & 0xFF]);
-        sumR = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumR);
+        sumR = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumR);
 
         sampleX = _mm_set1_ps(lut[(px >> 8) & 0xFF]);
-        sumG = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumG);
+        sumG = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumG);
 
         sampleX = _mm_set1_ps(lut[(px >> 16) & 0xFF]);
-        sumB = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumB);
+        sumB = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumB);
 
-        sumA = _mm_add_ps(coeffsXA, sumA);
+        sampleX = _mm_set1_ps(lut[px >> 24]);
+        sumA = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumA);
 
         aIn += 4;
         aCoeffsXF += 4;
@@ -394,18 +372,17 @@ static void ScaleDownBgraSse2(const uint8_t* aIn, float* aSumsYOut,
       for (int j = 0; j < aBorderBuf[i]; j++) {
         coeffsX = _mm_load_ps(aCoeffsXF);
 
-        coeffsXA = _mm_mul_ps(coeffsX, _mm_set1_ps(lut[aIn[3]]));
-
         sampleX = _mm_set1_ps(lut[aIn[0]]);
-        sumR = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumR);
+        sumR = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumR);
 
         sampleX = _mm_set1_ps(lut[aIn[1]]);
-        sumG = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumG);
+        sumG = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumG);
 
         sampleX = _mm_set1_ps(lut[aIn[2]]);
-        sumB = _mm_add_ps(_mm_mul_ps(coeffsXA, sampleX), sumB);
+        sumB = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumB);
 
-        sumA = _mm_add_ps(coeffsXA, sumA);
+        sampleX = _mm_set1_ps(lut[aIn[3]]);
+        sumA = _mm_add_ps(_mm_mul_ps(coeffsX, sampleX), sumA);
 
         aIn += 4;
         aCoeffsXF += 4;

@@ -22,34 +22,72 @@ static void YScaleOutBgraNeon(float* aSums, int aWidth, uint8_t* aOut,
   float32x4_t half = vdupq_n_f32(0.5f);
   float32x4_t z = vdupq_n_f32(0.0f);
 
-  for (int i = 0; i < aWidth; i++) {
-    /* Read [R, G, B, A] from current tap slot */
+  int i = 0;
+  for (; i + 3 < aWidth; i += 4) {
+    float32x4_t v0 = vld1q_f32(aSums + tapOff);
+    float32x4_t v1 = vld1q_f32(aSums + 16 + tapOff);
+    float32x4_t v2 = vld1q_f32(aSums + 32 + tapOff);
+    float32x4_t v3 = vld1q_f32(aSums + 48 + tapOff);
+
+    v0 = vminq_f32(vmaxq_f32(v0, zero), one);
+    v1 = vminq_f32(vmaxq_f32(v1, zero), one);
+    v2 = vminq_f32(vmaxq_f32(v2, zero), one);
+    v3 = vminq_f32(vmaxq_f32(v3, zero), one);
+
+    int32x4_t i0 = vcvtq_s32_f32(vaddq_f32(vmulq_f32(v0, scaleV), half));
+    int32x4_t i1 = vcvtq_s32_f32(vaddq_f32(vmulq_f32(v1, scaleV), half));
+    int32x4_t i2 = vcvtq_s32_f32(vaddq_f32(vmulq_f32(v2, scaleV), half));
+    int32x4_t i3 = vcvtq_s32_f32(vaddq_f32(vmulq_f32(v3, scaleV), half));
+
+    int16x4_t h0 = vqmovn_s32(i0);
+    int16x4_t h1 = vqmovn_s32(i1);
+    int16x8_t h01 = vcombine_s16(h0, h1);
+    int16x4_t h2 = vqmovn_s32(i2);
+    int16x4_t h3 = vqmovn_s32(i3);
+    int16x8_t h23 = vcombine_s16(h2, h3);
+
+    uint8x8_t b01 = vqmovun_s16(h01);
+    uint8x8_t b23 = vqmovun_s16(h23);
+    uint8x16_t result = vcombine_u8(b01, b23);
+
+    /* Ensure alpha >= max(R,G,B) for premultiplication invariant */
+    {
+      uint8x16_t s1 = vreinterpretq_u8_u32(
+          vshrq_n_u32(vreinterpretq_u32_u8(result), 8));
+      uint8x16_t mx = vmaxq_u8(result, s1);
+      uint8x16_t s2 =
+          vreinterpretq_u8_u32(vshrq_n_u32(vreinterpretq_u32_u8(mx), 16));
+      mx = vmaxq_u8(mx, s2);
+      uint8x16_t maxAlpha =
+          vreinterpretq_u8_u32(vshlq_n_u32(vreinterpretq_u32_u8(mx), 24));
+      result = vmaxq_u8(result, maxAlpha);
+    }
+
+    vst1q_u8(aOut, result);
+
+    vst1q_f32(aSums + tapOff, z);
+    vst1q_f32(aSums + 16 + tapOff, z);
+    vst1q_f32(aSums + 32 + tapOff, z);
+    vst1q_f32(aSums + 48 + tapOff, z);
+
+    aSums += 64;
+    aOut += 16;
+  }
+
+  for (; i < aWidth; i++) {
     float32x4_t vals = vld1q_f32(aSums + tapOff);
-
-    /* Clamp alpha to [0, 1] */
-    float alpha = vgetq_lane_f32(vals, 3);
-    if (alpha > 1.0f) {
-      alpha = 1.0f;
-    } else if (alpha < 0.0f) {
-      alpha = 0.0f;
-    }
-    float32x4_t alphaV = vdupq_n_f32(alpha);
-
-    /* Divide RGB by alpha (skip if alpha == 0) */
-    if (alpha != 0) {
-      vals = vdivq_f32(vals, alphaV);
-    }
-
-    /* Clamp RGB to [0, 1], scale to [0, 255], round */
     vals = vminq_f32(vmaxq_f32(vals, zero), one);
     int32x4_t idx = vcvtq_s32_f32(vaddq_f32(vmulq_f32(vals, scaleV), half));
 
     aOut[0] = vgetq_lane_s32(idx, 0);
     aOut[1] = vgetq_lane_s32(idx, 1);
     aOut[2] = vgetq_lane_s32(idx, 2);
-    aOut[3] = static_cast<int>(alpha * 255.0f + 0.5f);
+    uint8_t alpha = vgetq_lane_s32(idx, 3);
+    uint8_t maxRgb = aOut[0];
+    if (aOut[1] > maxRgb) maxRgb = aOut[1];
+    if (aOut[2] > maxRgb) maxRgb = aOut[2];
+    aOut[3] = alpha > maxRgb ? alpha : maxRgb;
 
-    /* Zero consumed tap */
     vst1q_f32(aSums + tapOff, z);
 
     aSums += 16;
@@ -90,33 +128,29 @@ static void ScaleDownBgraNeon(const uint8_t* aIn, float* aSumsYOut,
         float32x4_t coeffsX = vld1q_f32(aCoeffsXF);
         float32x4_t coeffsX2 = vld1q_f32(aCoeffsXF + 4);
 
-        float32x4_t coeffsXA =
-            vmulq_f32(coeffsX, vdupq_n_f32(gI2fMap[px0 >> 24]));
-
         float32x4_t sampleX = vdupq_n_f32(gI2fMap[px0 & 0xFF]);
-        sumR = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumR);
+        sumR = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumR);
 
         sampleX = vdupq_n_f32(gI2fMap[(px0 >> 8) & 0xFF]);
-        sumG = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumG);
+        sumG = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumG);
 
         sampleX = vdupq_n_f32(gI2fMap[(px0 >> 16) & 0xFF]);
-        sumB = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumB);
+        sumB = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumB);
 
-        sumA = vaddq_f32(coeffsXA, sumA);
-
-        float32x4_t coeffsX2A =
-            vmulq_f32(coeffsX2, vdupq_n_f32(gI2fMap[px1 >> 24]));
+        sampleX = vdupq_n_f32(gI2fMap[px0 >> 24]);
+        sumA = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumA);
 
         sampleX = vdupq_n_f32(gI2fMap[px1 & 0xFF]);
-        sumR2 = vaddq_f32(vmulq_f32(coeffsX2A, sampleX), sumR2);
+        sumR2 = vaddq_f32(vmulq_f32(coeffsX2, sampleX), sumR2);
 
         sampleX = vdupq_n_f32(gI2fMap[(px1 >> 8) & 0xFF]);
-        sumG2 = vaddq_f32(vmulq_f32(coeffsX2A, sampleX), sumG2);
+        sumG2 = vaddq_f32(vmulq_f32(coeffsX2, sampleX), sumG2);
 
         sampleX = vdupq_n_f32(gI2fMap[(px1 >> 16) & 0xFF]);
-        sumB2 = vaddq_f32(vmulq_f32(coeffsX2A, sampleX), sumB2);
+        sumB2 = vaddq_f32(vmulq_f32(coeffsX2, sampleX), sumB2);
 
-        sumA2 = vaddq_f32(coeffsX2A, sumA2);
+        sampleX = vdupq_n_f32(gI2fMap[px1 >> 24]);
+        sumA2 = vaddq_f32(vmulq_f32(coeffsX2, sampleX), sumA2);
 
         aIn += 8;
         aCoeffsXF += 8;
@@ -128,19 +162,17 @@ static void ScaleDownBgraNeon(const uint8_t* aIn, float* aSumsYOut,
 
         float32x4_t coeffsX = vld1q_f32(aCoeffsXF);
 
-        float32x4_t coeffsXA =
-            vmulq_f32(coeffsX, vdupq_n_f32(gI2fMap[px >> 24]));
-
         float32x4_t sampleX = vdupq_n_f32(gI2fMap[px & 0xFF]);
-        sumR = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumR);
+        sumR = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumR);
 
         sampleX = vdupq_n_f32(gI2fMap[(px >> 8) & 0xFF]);
-        sumG = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumG);
+        sumG = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumG);
 
         sampleX = vdupq_n_f32(gI2fMap[(px >> 16) & 0xFF]);
-        sumB = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumB);
+        sumB = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumB);
 
-        sumA = vaddq_f32(coeffsXA, sumA);
+        sampleX = vdupq_n_f32(gI2fMap[px >> 24]);
+        sumA = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumA);
 
         aIn += 4;
         aCoeffsXF += 4;
@@ -157,19 +189,17 @@ static void ScaleDownBgraNeon(const uint8_t* aIn, float* aSumsYOut,
 
         float32x4_t coeffsX = vld1q_f32(aCoeffsXF);
 
-        float32x4_t coeffsXA =
-            vmulq_f32(coeffsX, vdupq_n_f32(gI2fMap[px >> 24]));
-
         float32x4_t sampleX = vdupq_n_f32(gI2fMap[px & 0xFF]);
-        sumR = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumR);
+        sumR = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumR);
 
         sampleX = vdupq_n_f32(gI2fMap[(px >> 8) & 0xFF]);
-        sumG = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumG);
+        sumG = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumG);
 
         sampleX = vdupq_n_f32(gI2fMap[(px >> 16) & 0xFF]);
-        sumB = vaddq_f32(vmulq_f32(coeffsXA, sampleX), sumB);
+        sumB = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumB);
 
-        sumA = vaddq_f32(coeffsXA, sumA);
+        sampleX = vdupq_n_f32(gI2fMap[px >> 24]);
+        sumA = vaddq_f32(vmulq_f32(coeffsX, sampleX), sumA);
 
         aIn += 4;
         aCoeffsXF += 4;

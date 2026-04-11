@@ -160,16 +160,17 @@ static void ShiftLeftF(float* aF) {
 static void YScaleOutBgra(float* aSums, int aWidth, uint8_t* aOut, int aTap) {
   int tapOff = aTap * 4;
   for (int i = 0; i < aWidth; i++) {
-    float alpha = ClampF(aSums[tapOff + 3]);
+    uint8_t maxRgb = 0;
     for (int j = 0; j < 3; j++) {
-      float val = aSums[tapOff + j];
-      if (alpha != 0) {
-        val /= alpha;
+      aOut[j] = static_cast<int>(roundf(ClampF(aSums[tapOff + j]) * 255.0f));
+      if (aOut[j] > maxRgb) {
+        maxRgb = aOut[j];
       }
-      aOut[j] = static_cast<int>(roundf(ClampF(val) * 255.0f));
       aSums[tapOff + j] = 0.0f;
     }
-    aOut[3] = roundf(alpha * 255.0f);
+    uint8_t alpha =
+        static_cast<int>(roundf(ClampF(aSums[tapOff + 3]) * 255.0f));
+    aOut[3] = std::max(alpha, maxRgb);
     aSums[tapOff + 3] = 0.0f;
     aSums += 16;
     aOut += 4;
@@ -260,11 +261,9 @@ static void ScaleDownBgra(const uint8_t* aIn, float* aSumsY, int aOutWidth,
 
   for (int i = 0; i < aOutWidth; i++) {
     for (int j = 0; j < aBorderBuf[i]; j++) {
-      float alpha = gI2fMap[aIn[3]];
-      for (int k = 0; k < 3; k++) {
-        AddSampleToSumF(gI2fMap[aIn[k]] * alpha, aCoeffsX, sum[k]);
+      for (int k = 0; k < 4; k++) {
+        AddSampleToSumF(gI2fMap[aIn[k]], aCoeffsX, sum[k]);
       }
-      AddSampleToSumF(alpha, aCoeffsX, sum[3]);
       aIn += 4;
       aCoeffsX += 4;
     }
