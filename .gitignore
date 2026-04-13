@@ -2,3 +2,5 @@ _*.md
 *.o
 benchmark
 test
+downscale-streamingscaler
+downscale-skia

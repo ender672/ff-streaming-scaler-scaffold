@@ -5,10 +5,18 @@
 #ifndef MOZILLA_GFX_STREAMINGSCALERINTERNAL_H_
 #define MOZILLA_GFX_STREAMINGSCALERINTERNAL_H_
 
+#include <array>
+
 namespace mozilla::gfx {
 
 /* Lookup table mapping byte values [0,255] to float values [0.0, 1.0]. */
-extern const float gI2fMap[256];
+inline constexpr auto gI2fMap = [] {
+  std::array<float, 256> map{};
+  for (int i = 0; i < 256; i++) {
+    map[i] = float(i) / 255.0f;
+  }
+  return map;
+}();
 
 }  // namespace mozilla::gfx
 

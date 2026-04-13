@@ -80,7 +80,7 @@ static void YScaleOutBgrxAvx2(float* aSums, int aWidth, uint8_t* aOut,
 static void ScaleDownBgrxAvx2(const uint8_t* aIn, float* aSumsYOut,
                               int aOutWidth, float* aCoeffsXF, int* aBorderBuf,
                               float* aCoeffsYF, int aTap) {
-  const float* lut = gI2fMap;
+  const float* lut = gI2fMap.data();
 
   /* Precompute 256-bit coefficient vectors ordered by physical slot */
   __m256 cyLo, cyHi;
@@ -280,7 +280,7 @@ static void YScaleOutBgraAvx2(float* aSums, int aWidth, uint8_t* aOut,
 static void ScaleDownBgraAvx2(const uint8_t* aIn, float* aSumsYOut,
                               int aOutWidth, float* aCoeffsXF, int* aBorderBuf,
                               float* aCoeffsYF, int aTap) {
-  const float* lut = gI2fMap;
+  const float* lut = gI2fMap.data();
 
   __m256 cy256Lo, cy256Hi;
   {

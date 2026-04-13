@@ -52,8 +52,8 @@ static void YScaleOutBgraNeon(float* aSums, int aWidth, uint8_t* aOut,
 
     /* Ensure alpha >= max(R,G,B) for premultiplication invariant */
     {
-      uint8x16_t s1 = vreinterpretq_u8_u32(
-          vshrq_n_u32(vreinterpretq_u32_u8(result), 8));
+      uint8x16_t s1 =
+          vreinterpretq_u8_u32(vshrq_n_u32(vreinterpretq_u32_u8(result), 8));
       uint8x16_t mx = vmaxq_u8(result, s1);
       uint8x16_t s2 =
           vreinterpretq_u8_u32(vshrq_n_u32(vreinterpretq_u32_u8(mx), 16));

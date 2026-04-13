@@ -81,7 +81,7 @@ static void YScaleOutBgrxSse2(float* aSums, int aWidth, uint8_t* aOut,
 static void ScaleDownBgrxSse2(const uint8_t* aIn, float* aSumsYOut,
                               int aOutWidth, float* aCoeffsXF, int* aBorderBuf,
                               float* aCoeffsYF, int aTap) {
-  const float* lut = gI2fMap;
+  const float* lut = gI2fMap.data();
   int off0 = aTap * 4;
   int off1 = ((aTap + 1) & 3) * 4;
   int off2 = ((aTap + 2) & 3) * 4;
@@ -290,7 +290,7 @@ static void ScaleDownBgraSse2(const uint8_t* aIn, float* aSumsYOut,
   __m128 cy2 = _mm_set1_ps(aCoeffsYF[2]);
   __m128 cy3 = _mm_set1_ps(aCoeffsYF[3]);
 
-  const float* lut = gI2fMap;
+  const float* lut = gI2fMap.data();
 
   __m128 coeffsX, coeffsX2, sampleX;
   __m128 sumR = _mm_setzero_ps();
