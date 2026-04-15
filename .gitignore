@@ -1,4 +1,5 @@
 _*.md
+SKIA-SHIFT.md
 *.o
 benchmark
 test
