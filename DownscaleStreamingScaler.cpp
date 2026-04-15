@@ -163,15 +163,11 @@ int main(int argc, char** argv) {
   fprintf(stderr, "Loaded %s (%dx%d)\n", inputPath, image.mWidth,
           image.mHeight);
 
-  // Compute output dimensions preserving aspect ratio.
+  // Compute output dimensions.
   int outWidth, outHeight;
   if (targetWidth > 0 && targetHeight > 0) {
-    // Fit within the bounding box.
-    double scaleW = static_cast<double>(targetWidth) / image.mWidth;
-    double scaleH = static_cast<double>(targetHeight) / image.mHeight;
-    double scale = std::min(scaleW, scaleH);
-    outWidth = std::max(1, static_cast<int>(lround(image.mWidth * scale)));
-    outHeight = std::max(1, static_cast<int>(lround(image.mHeight * scale)));
+    outWidth = targetWidth;
+    outHeight = targetHeight;
   } else if (targetWidth > 0) {
     double scale = static_cast<double>(targetWidth) / image.mWidth;
     outWidth = targetWidth;
