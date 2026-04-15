@@ -11,13 +11,18 @@ using namespace mozilla::gfx;
 
 static void PrintUsage(const char* argv0) {
   fprintf(stderr,
-          "Usage: %s <input.png|jpg> <output.png> [--width W] [--height H]\n"
+          "Usage: %s <input.jpg> <output.png> [--width W] [--height H]\n"
           "\n"
-          "Downscale a PNG or JPEG image using Skia Lanczos3.\n"
-          "Input format is auto-detected. Specify --width, --height, or\n"
-          "both. When only one dimension is given, the other is computed\n"
-          "to preserve the aspect ratio. When both are given, the image\n"
-          "is scaled to the exact requested dimensions.\n",
+          "Input must be JPEG (IDCT pre-scaling requires JPEG decode).\n"
+          "\n"
+          "Downscale a JPEG image using Firefox's IDCT pre-scaling\n"
+          "followed by Skia Lanczos3. The JPEG is first decoded at a\n"
+          "reduced resolution (1/2, 1/4, or 1/8) via libjpeg-turbo's\n"
+          "IDCT scaling, using the same factor selection as Firefox's\n"
+          "nsJPEGDecoder. The intermediate image is then downscaled to\n"
+          "the final target size with Skia Lanczos3.\n"
+          "\n"
+          "Specify --width, --height, or both.\n",
           argv0);
 }
 
@@ -50,35 +55,57 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  Image image = LoadImage(inputPath);
-  fprintf(stderr, "Loaded %s (%dx%d)\n", inputPath, image.mWidth,
-          image.mHeight);
+  // Read JPEG header to get full image dimensions for scale factor computation.
+  JpegDimensions fullDims = ReadJpegDimensions(inputPath);
+  fprintf(stderr, "Full JPEG dimensions: %dx%d\n", fullDims.mWidth,
+          fullDims.mHeight);
 
-  // Compute output dimensions.
+  // Compute final output dimensions from full image dimensions (same as the
+  // other tools), so the target is identical regardless of IDCT pre-scaling.
   int outWidth, outHeight;
   if (targetWidth > 0 && targetHeight > 0) {
     outWidth = targetWidth;
     outHeight = targetHeight;
   } else if (targetWidth > 0) {
-    double scale = static_cast<double>(targetWidth) / image.mWidth;
+    double scale = static_cast<double>(targetWidth) / fullDims.mWidth;
     outWidth = targetWidth;
-    outHeight = std::max(1, static_cast<int>(lround(image.mHeight * scale)));
+    outHeight = std::max(1, static_cast<int>(lround(fullDims.mHeight * scale)));
   } else {
-    double scale = static_cast<double>(targetHeight) / image.mHeight;
+    double scale = static_cast<double>(targetHeight) / fullDims.mHeight;
     outHeight = targetHeight;
-    outWidth = std::max(1, static_cast<int>(lround(image.mWidth * scale)));
+    outWidth = std::max(1, static_cast<int>(lround(fullDims.mWidth * scale)));
   }
 
-  if (outWidth > image.mWidth || outHeight > image.mHeight) {
+  if (outWidth > fullDims.mWidth || outHeight > fullDims.mHeight) {
     fprintf(stderr,
             "Error: output (%dx%d) is larger than input (%dx%d). "
             "Only downscaling is supported.\n",
-            outWidth, outHeight, image.mWidth, image.mHeight);
-    free(image.mBuffer);
+            outWidth, outHeight, fullDims.mWidth, fullDims.mHeight);
     return 1;
   }
 
-  fprintf(stderr, "Scaling to %dx%d\n", outWidth, outHeight);
+  // Compute the IDCT pre-scale factor using Firefox's algorithm.
+  int scaleDenom = ComputeIdctScaleDenom(fullDims.mWidth, fullDims.mHeight,
+                                         outWidth, outHeight);
+  fprintf(stderr, "IDCT scale factor: 1/%d\n", scaleDenom);
+
+  // Decode the JPEG with IDCT pre-scaling.
+  Image image = LoadJpeg(inputPath, scaleDenom);
+  fprintf(stderr, "Intermediate size after IDCT: %dx%d\n", image.mWidth,
+          image.mHeight);
+
+  // If IDCT scaling already produced the exact target size (or smaller), just
+  // write it out directly.
+  if (image.mWidth <= outWidth && image.mHeight <= outHeight) {
+    fprintf(stderr, "IDCT output already at or below target; no Lanczos pass.\n");
+    SavePng(outputPath, image.mBuffer, image.mWidth, image.mHeight, true);
+    fprintf(stderr, "Wrote %s\n", outputPath);
+    free(image.mBuffer);
+    return 0;
+  }
+
+  fprintf(stderr, "Scaling %dx%d -> %dx%d with Lanczos3\n", image.mWidth,
+          image.mHeight, outWidth, outHeight);
 
   skia::SkLanczosFilter lanczos;
 
