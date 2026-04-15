@@ -1,7 +1,11 @@
 _*.md
 SKIA-SHIFT.md
 *.o
+*.jpg
+*.png
 benchmark
 test
+compare
 downscale-streamingscaler
 downscale-skia
+downscale-skia-idct
