@@ -1,6 +1,7 @@
 #include "MozShims.h"
 #include "SkConvolver.h"
 #include "ImageIO.h"
+#include "JpegIdctScale.h"
 
 #include <cmath>
 #include <cstdio>
