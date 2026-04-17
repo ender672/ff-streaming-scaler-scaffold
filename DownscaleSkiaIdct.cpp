@@ -23,18 +23,13 @@ static void PrintUsage(const char* argv0) {
           "nsJPEGDecoder. The intermediate image is then downscaled to\n"
           "the final target size with Skia Lanczos3.\n"
           "\n"
-          "--idct-min-factor N  Ensure the IDCT pre-scale produces\n"
-          "    an intermediate image at least Nx the target size in\n"
-          "    each dimension. The IDCT denominator is backed off until\n"
-          "    this is satisfied, so the intermediate will be between\n"
-          "    Nx the target and the full original size.\n"
-          "    Smaller values force Lanczos3 to do more of the\n"
-          "    downscale (slower, but better anti-aliasing).\n"
-          "    The IDCT denominator is stepped down through {8,4,2,1}\n"
-          "    until the constraint is met, so the actual intermediate\n"
-          "    size may be well below the limit when no power-of-2 step\n"
-          "    lands in the target range.\n"
-          "    Default: no limit (use Firefox's full algorithm).\n"
+          "--idct-min-factor N  Minimum oversampling ratio (intermediate /\n"
+          "    target) required before a given IDCT denom is picked, matching\n"
+          "    Firefox's image.jpeg.dct_scaling_min_factor pref. Larger values\n"
+          "    force smaller IDCT denominators, shifting more of the downscale\n"
+          "    onto Lanczos3 (slower, but better anti-aliasing).\n"
+          "    Values < 1.0 are clamped to 1.0 (same as Firefox).\n"
+          "    Default: 1.0 (Firefox's default).\n"
           "\n"
           "Specify --width, --height, or both.\n",
           argv0);
@@ -50,7 +45,7 @@ int main(int argc, char** argv) {
   const char* outputPath = argv[2];
   int targetWidth = 0;
   int targetHeight = 0;
-  int idctMinFactor = 0;  // 0 = no limit
+  float idctMinFactor = 1.0f;  // Firefox default.
 
   for (int i = 3; i < argc; i++) {
     if (strcmp(argv[i], "--width") == 0 && i + 1 < argc) {
@@ -58,11 +53,7 @@ int main(int argc, char** argv) {
     } else if (strcmp(argv[i], "--height") == 0 && i + 1 < argc) {
       targetHeight = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--idct-min-factor") == 0 && i + 1 < argc) {
-      idctMinFactor = atoi(argv[++i]);
-      if (idctMinFactor < 1) {
-        fprintf(stderr, "Error: --idct-min-factor must be >= 1.\n");
-        return 1;
-      }
+      idctMinFactor = static_cast<float>(atof(argv[++i]));
     } else {
       fprintf(stderr, "Unknown option: %s\n", argv[i]);
       PrintUsage(argv[0]);
@@ -107,28 +98,9 @@ int main(int argc, char** argv) {
 
   // Compute the IDCT pre-scale factor using Firefox's algorithm.
   int scaleDenom = ComputeIdctScaleDenom(fullDims.mWidth, fullDims.mHeight,
-                                         outWidth, outHeight);
-
-  // If --idct-min-factor is set, reduce the denominator until the IDCT output
-  // is at least idctMinFactor * target in each dimension.
-  if (idctMinFactor > 0) {
-    int unclamped = scaleDenom;
-    while (scaleDenom > 1) {
-      int idctW = (fullDims.mWidth + scaleDenom - 1) / scaleDenom;
-      int idctH = (fullDims.mHeight + scaleDenom - 1) / scaleDenom;
-      if (idctW >= outWidth * idctMinFactor &&
-          idctH >= outHeight * idctMinFactor) {
-        break;
-      }
-      // Step down: 8->4, 4->2, 2->1.
-      scaleDenom /= 2;
-    }
-    fprintf(stderr, "IDCT scale factor: 1/%d (clamped from 1/%d by "
-                    "--idct-min-factor %d)\n",
-            scaleDenom, unclamped, idctMinFactor);
-  } else {
-    fprintf(stderr, "IDCT scale factor: 1/%d\n", scaleDenom);
-  }
+                                         outWidth, outHeight, idctMinFactor);
+  fprintf(stderr, "IDCT scale factor: 1/%d (min-factor %.2f)\n", scaleDenom,
+          std::max(1.0f, idctMinFactor));
 
   // Decode the JPEG with IDCT pre-scaling.
   Image image = LoadJpeg(inputPath, scaleDenom);
