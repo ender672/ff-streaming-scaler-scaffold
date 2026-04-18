@@ -4,8 +4,12 @@ SKIA-SHIFT.md
 *.jpg
 *.png
 benchmark
+idct-benchmark
 test
 compare
 downscale-streamingscaler
 downscale-skia
 downscale-skia-idct
+
+# Local Netlify folder
+.netlify

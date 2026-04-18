@@ -33,7 +33,7 @@ endif
 
 OBJS = $(SS_OBJS) $(SK_OBJS)
 
-all: benchmark test downscale-streamingscaler downscale-skia downscale-skia-idct
+all: benchmark idct-benchmark test downscale-streamingscaler downscale-skia downscale-skia-idct
 
 StreamingScaler.o: StreamingScaler.cpp StreamingScaler.h StreamingScalerInternal.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
@@ -74,7 +74,10 @@ downscale-skia: DownscaleSkia.cpp $(SK_OBJS)
 downscale-skia-idct: DownscaleSkiaIdct.cpp $(SK_OBJS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(SK_OBJS) DownscaleSkiaIdct.cpp -o $@ -ljpeg -lpng -lm
 
+idct-benchmark: IdctBenchmark.cpp $(SK_OBJS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(SK_OBJS) IdctBenchmark.cpp -o $@ -ljpeg -lpng -lm
+
 clean:
-	rm -f benchmark test downscale-streamingscaler downscale-skia downscale-skia-idct *.o
+	rm -f benchmark idct-benchmark test downscale-streamingscaler downscale-skia downscale-skia-idct *.o
 
 .PHONY: all clean
