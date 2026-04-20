@@ -272,6 +272,13 @@ static inline __attribute__((always_inline)) void ScaleDownNeonImpl(
         if (NChannels == 4) {
           sampleX = vdupq_n_f32(gI2fMap[px >> 24]);
           sum3 = vaddq_f32(vmulq_f32(coeffsX, sampleX), sum3);
+        } else {
+          /* Keep a fourth independent accumulator live for BGRX so this loop
+           * has enough ILP to hide fadd latency; without it, mild-downscale
+           * (e.g. 2560->2048) runs ~40% slower on Apple Silicon. The
+           * accumulated value lands in the X slot of the packed pixel, which
+           * YScaleOutBgrx overwrites to 255 later. */
+          sum3 = vaddq_f32(coeffsX, sum3);
         }
 
         aIn += 4;
@@ -279,18 +286,14 @@ static inline __attribute__((always_inline)) void ScaleDownNeonImpl(
       }
     }
 
-    /* X slot is unused downstream for BGRX; feed sum2 as filler. */
-    float32x4_t fourth = NChannels == 4 ? sum3 : sum2;
     ScatterRingFmaNeon(aSumsYOut, off0, off1, off2, off3, cy0, cy1, cy2, cy3,
-                       GatherLane0Neon(sum0, sum1, sum2, fourth));
+                       GatherLane0Neon(sum0, sum1, sum2, sum3));
     aSumsYOut += 16;
 
     sum0 = ShiftFLeftNeon(sum0);
     sum1 = ShiftFLeftNeon(sum1);
     sum2 = ShiftFLeftNeon(sum2);
-    if (NChannels == 4) {
-      sum3 = ShiftFLeftNeon(sum3);
-    }
+    sum3 = ShiftFLeftNeon(sum3);
   }
 }
 
