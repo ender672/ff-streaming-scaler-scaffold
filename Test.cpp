@@ -35,12 +35,11 @@ static long double Cubic(long double b, long double c, long double x) {
 
 static long double RefCatrom(long double x) { return Cubic(0, 0.5L, x); }
 
-static int RefCalcTaps(int aDimIn, int aDimOut) {
-  if (aDimIn < aDimOut) {
+static int RefMaxTapsCheck(int aDimIn, int aDimOut) {
+  if (aDimIn <= aDimOut) {
     return 4;
   }
-  int tmp = aDimIn * 4 / aDimOut;
-  return tmp - (tmp % 2);
+  return static_cast<int>(ceill(4.0L * aDimIn / aDimOut)) + 1;
 }
 
 static long double RefMap(int aDimIn, int aDimOut, int aPos) {
@@ -54,21 +53,16 @@ static int RefSplitMap(int aDimIn, int aDimOut, int aPos, long double* aTy) {
   return smpI;
 }
 
-static void RefCalcCoeffs(long double* aCoeffs, long double aOffset, int aTaps,
-                          int aLtrim, int aRtrim) {
-  assert(aTaps - aLtrim - aRtrim > 0);
-  long double tapMult = (long double)aTaps / 4;
+static void RefCalcCoeffs(long double* aCoeffs, int aNSamples, int aSmpStart,
+                          long double aCenter, long double aTapMult) {
+  assert(aNSamples > 0);
   long double fudge = 0.0L;
-  for (int i = 0; i < aTaps; i++) {
-    if (i < aLtrim || i >= aTaps - aRtrim) {
-      aCoeffs[i] = 0;
-      continue;
-    }
-    long double tapOffset = 1 - aOffset - aTaps / 2 + i;
-    aCoeffs[i] = RefCatrom(fabsl(tapOffset) / tapMult) / tapMult;
+  for (int i = 0; i < aNSamples; i++) {
+    long double dist = fabsl((long double)(aSmpStart + i) - aCenter);
+    aCoeffs[i] = RefCatrom(dist / aTapMult) / aTapMult;
     fudge += aCoeffs[i];
   }
-  for (int i = 0; i < aTaps; i++) {
+  for (int i = 0; i < aNSamples; i++) {
     aCoeffs[i] /= fudge;
   }
 }
@@ -117,33 +111,40 @@ static void Free2dLd(long double** aPtr, int aHeight) {
 
 static void RefXScale(long double* aIn, int aInWidth, long double* aOut,
                       int aOutWidth) {
-  int taps = RefCalcTaps(aInWidth, aOutWidth);
-  auto* coeffs =
-      static_cast<long double*>(malloc(taps * sizeof(long double)));
+  long double tapMult =
+      aInWidth <= aOutWidth ? 1.0L : (long double)aInWidth / aOutWidth;
+  long double radius = 2.0L * tapMult;
+  auto* coeffs = static_cast<long double*>(
+      malloc(RefMaxTapsCheck(aInWidth, aOutWidth) * sizeof(long double)));
   int maxPos = aInWidth - 1;
 
   for (int i = 0; i < aOutWidth; i++) {
     long double tx;
     int smpI = RefSplitMap(aInWidth, aOutWidth, i, &tx);
-    int start = smpI - (taps / 2 - 1);
+    long double center = smpI + tx;
 
-    int startSafe = start;
-    if (startSafe < 0) startSafe = 0;
-    int ltrim = startSafe - start;
-
-    int tapsSafe = taps - ltrim;
-    if (startSafe + tapsSafe > maxPos) {
-      tapsSafe = maxPos - startSafe + 1;
+    int smpStart = static_cast<int>(ceill(center - radius));
+    int smpEnd = static_cast<int>(floorl(center + radius));
+    if ((long double)smpStart == center - radius) {
+      smpStart++;
     }
-    int rtrim = (start + taps) - (startSafe + tapsSafe);
+    if ((long double)smpEnd == center + radius) {
+      smpEnd--;
+    }
+    if (smpStart < 0) {
+      smpStart = 0;
+    }
+    if (smpEnd > maxPos) {
+      smpEnd = maxPos;
+    }
+    int nSamples = smpEnd - smpStart + 1;
 
-    RefCalcCoeffs(coeffs, tx, taps, ltrim, rtrim);
+    RefCalcCoeffs(coeffs, nSamples, smpStart, center, tapMult);
 
     for (int j = 0; j < kCmp; j++) {
       aOut[i * kCmp + j] = 0;
-      for (int k = 0; k < tapsSafe; k++) {
-        int inPos = startSafe + k;
-        aOut[i * kCmp + j] += coeffs[ltrim + k] * aIn[inPos * kCmp + j];
+      for (int k = 0; k < nSamples; k++) {
+        aOut[i * kCmp + j] += coeffs[k] * aIn[(smpStart + k) * kCmp + j];
       }
     }
   }
@@ -373,6 +374,35 @@ static void TestScaleRectAll() {
   TestScaleRect(640, 480, 160, 120, SurfaceFormat::B8G8R8X8);
 }
 
+// --- Near-identity precision sweep ---
+
+/* Sweep near-identity up/down scales (N <-> N-1) across sizes, colorspaces,
+ * and seeds. Targets the regime where float accumulation in coefficient
+ * sums has the least headroom. */
+static void TestScaleNearIdentity() {
+  static const int sizes[] = {7, 16, 33, 50, 99, 100};
+  static const SurfaceFormat spaces[] = {SurfaceFormat::B8G8R8A8,
+                                         SurfaceFormat::B8G8R8X8};
+  static const unsigned int seeds[] = {1531289551u, 0xdeadbeefu};
+  int nSizes = sizeof(sizes) / sizeof(sizes[0]);
+  int nSpaces = sizeof(spaces) / sizeof(spaces[0]);
+  int nSeeds = sizeof(seeds) / sizeof(seeds[0]);
+
+  for (int seedI = 0; seedI < nSeeds; seedI++) {
+    srand(seeds[seedI]);
+    for (int szI = 0; szI < nSizes; szI++) {
+      int n = sizes[szI];
+      for (int csI = 0; csI < nSpaces; csI++) {
+        SurfaceFormat cs = spaces[csI];
+        // StreamingScaler only supports downscale; only test N -> N-1.
+        if (n > 1) {
+          TestScaleSquareRand(n, n - 1, cs);
+        }
+      }
+    }
+  }
+}
+
 // --- Reset tests ---
 
 static void TestReset(int aInW, int aInH, int aOutW, int aOutH,
@@ -454,6 +484,7 @@ static void RunTests(Impl* aImpl) {
   TestScaleCatromExtremes();
   TestScaleRectAll();
   TestResetAll();
+  TestScaleNearIdentity();
 }
 
 int main() {

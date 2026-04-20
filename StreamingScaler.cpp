@@ -54,18 +54,14 @@ static int SplitMap(int aDimIn, int aDimOut, int aPos, float* aRest) {
 }
 
 /**
- * Given input and output dimension, calculate the total number of taps that
- * will be needed to calculate an output sample.
- *
- * When we reduce an image by a factor of two, we need to scale our resampling
- * function by two as well in order to avoid aliasing.
+ * Return the maximum number of input samples that can contribute to any single
+ * output sample. Used only for buffer allocation.
  */
-static int CalcTaps(int aDimIn, int aDimOut) {
-  if (aDimOut > aDimIn) {
+static int MaxTaps(int aDimIn, int aDimOut) {
+  if (aDimOut >= aDimIn) {
     return kTaps;
   }
-  int tmp = kTaps * aDimIn / aDimOut;
-  return tmp - (tmp & 1);
+  return static_cast<int>(ceil(4.0 * aDimIn / aDimOut)) + 1;
 }
 
 /**
@@ -76,27 +72,6 @@ static float Catrom(float aX) {
     return (1.5f * aX - 2.5f) * aX * aX + 1;
   }
   return (((5 - aX) * aX - 8) * aX + 4) / 2;
-}
-
-/**
- * Given an offset tx, calculate taps coefficients.
- */
-static void CalcCoeffs(float* aCoeffs, float aTx, int aTaps, int aLtrim,
-                       int aRtrim) {
-  float tapMult = static_cast<float>(aTaps) / kTaps;
-  aTx = 1 - aTx - aTaps / 2 + aLtrim;
-  float fudge = 0.0f;
-
-  for (int i = aLtrim; i < aTaps - aRtrim; i++) {
-    float tmp = Catrom(fabsf(aTx) / tapMult) / tapMult;
-    fudge += tmp;
-    aCoeffs[i] = tmp;
-    aTx += 1;
-  }
-  fudge = 1 / fudge;
-  for (int i = aLtrim; i < aTaps - aRtrim; i++) {
-    aCoeffs[i] *= fudge;
-  }
 }
 
 /**
@@ -178,29 +153,52 @@ static void YScaleOut(float* aSums, int aWidth, uint8_t* aOut, bool aHasAlpha,
  */
 static void ScaleDownCoeffs(int aInDim, int aOutDim, float* aCoeffBuf,
                             int* aBorderBuf, float* aTmpCoeffs) {
-  int taps = CalcTaps(aInDim, aOutDim);
+  double tapMult = static_cast<double>(aInDim) / aOutDim;
+  double radius = 2.0 * tapMult;
   int ends[4] = {-1, -1, -1, -1};
 
   for (int i = 0; i < aOutDim; i++) {
     float tx;
     int smpI = SplitMap(aInDim, aOutDim, i, &tx);
+    double center = smpI + static_cast<double>(tx);
 
-    int smpStart = smpI - (taps / 2 - 1);
-    int smpEnd = smpI + taps / 2;
+    double leftEdge = center - radius;
+    double rightEdge = center + radius;
+    int smpStart = static_cast<int>(ceil(leftEdge));
+    int smpEnd = static_cast<int>(floor(rightEdge));
+    if (static_cast<double>(smpStart) == leftEdge) {
+      smpStart++;
+    }
+    if (static_cast<double>(smpEnd) == rightEdge) {
+      smpEnd--;
+    }
+    if (smpStart < 0) {
+      smpStart = 0;
+    }
     if (smpEnd >= aInDim) {
       smpEnd = aInDim - 1;
     }
+    int nSamples = smpEnd - smpStart + 1;
+
     ends[i % 4] = smpEnd;
     aBorderBuf[i] = smpEnd - ends[(i + 3) % 4];
 
-    int ltrim = 0;
-    if (smpStart < 0) {
-      ltrim = -1 * smpStart;
+    float fudge = 0.0f;
+    for (int j = 0; j < nSamples; j++) {
+      double dist = fabs(static_cast<double>(smpStart + j) - center);
+      aTmpCoeffs[j] = Catrom(static_cast<float>(dist / tapMult)) /
+                      static_cast<float>(tapMult);
+      fudge += aTmpCoeffs[j];
     }
-    int rtrim = smpStart + (taps - 1) - smpEnd;
-    CalcCoeffs(aTmpCoeffs, tx, taps, ltrim, rtrim);
+    fudge = 1.0f / fudge;
+    for (int j = 0; j < nSamples; j++) {
+      aTmpCoeffs[j] *= fudge;
+    }
 
-    for (int j = ltrim; j < taps - rtrim; j++) {
+    /* Each input sample feeds at most 4 outputs. `offset` counts how many of
+     * the prior outputs (i-1, i-2, i-3) also include pos, identifying pos's
+     * phase in the 4-slot ring buffer at aCoeffBuf[pos * 4 + offset]. */
+    for (int j = 0; j < nSamples; j++) {
       int pos = smpStart + j;
 
       int offset = 3;
@@ -347,8 +345,8 @@ bool StreamingScaler::Init(const IntSize& aInputSize,
     return false;
   }
 
-  int tapsX = CalcTaps(inW, outW);
-  int tapsY = CalcTaps(inH, outH);
+  int tapsX = MaxTaps(inW, outW);
+  int tapsY = MaxTaps(inH, outH);
 
   mCoeffsX.Realloc(kTaps * std::max(inW, outW), true);
   mBordersX.Realloc(std::min(inW, outW), true);
